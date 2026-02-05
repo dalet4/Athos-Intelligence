@@ -1,0 +1,131 @@
+{
+    "name": "Athos Commerce - Agency Scraper MVP",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "scrape-agency",
+                "options": {}
+            },
+            "id": "webhook-trigger",
+            "name": "Webhook Trigger",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                100,
+                300
+            ],
+            "webhookId": "scrape-agency"
+        },
+        {
+            "parameters": {
+                "operation": "scrape",
+                "url": "={{ $json.body.url }}",
+                "requestOptions": {
+                    "formats": [
+                        "markdown"
+                    ]
+                }
+            },
+            "type": "@mendable/n8n-nodes-firecrawl.firecrawl",
+            "typeVersion": 1,
+            "position": [
+                400,
+                300
+            ],
+            "id": "firecrawl-scrape",
+            "name": "Firecrawl Scrape",
+            "credentials": {
+                "firecrawlApi": {
+                    "id": "Choose Your Credential",
+                    "name": "Firecrawl Account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "modelId": {
+                    "__rl": true,
+                    "value": "gpt-4o",
+                    "mode": "list",
+                    "cachedResultName": "GPT-4o"
+                },
+                "messages": {
+                    "values": [
+                        {
+                            "role": "system",
+                            "content": "You are an expert agency analyst. Your goal is to extract structured data about a digital agency from their website content. \n\nYou will be provided with the website content in Markdown format.\n\nExtract the following information perfectly into JSON format:\n- name: Agency Name\n- description: A concise description of what they do.\n- specializations: Array of strings (e.g. \"SEO\", \"Web Design\")\n- platforms: Array of supported platforms (e.g. \"Shopify\", \"React\")\n- clients: Array of client objects found. Each client should have:\n  - name\n  - description (brief project summary)\n  - industry (infer if not explicit)\n  - estimatedRevenue (if mentioned/impliable, else \"N/A\")\n  - platform (if mentioned)\n  - caseStudies: Array of case studies for this client (if any). Each CaseStudy needs: title, description, results (array of strings like \"20% growth\"), technologies (array), projectType.\n\nInfer reasonable values if slight context is available, but do not hallucinate completely new clients."
+                        },
+                        {
+                            "role": "user",
+                            "content": "={{ $json.markdown || $json.content }}"
+                        }
+                    ]
+                },
+                "jsonOutput": true
+            },
+            "id": "ai-extract",
+            "name": "Extract Structured Data",
+            "type": "n8n-nodes-base.openAi",
+            "typeVersion": 1,
+            "position": [
+                700,
+                300
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "Choose Your Credential",
+                    "name": "OpenAI Account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "id": "respond-to-webhook",
+            "name": "Return Data to App",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                980,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Firecrawl Scrape",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Firecrawl Scrape": {
+            "main": [
+                [
+                    {
+                        "node": "Extract Structured Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extract Structured Data": {
+            "main": [
+                [
+                    {
+                        "node": "Return Data to App",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}
