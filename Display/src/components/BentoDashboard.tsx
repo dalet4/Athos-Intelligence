@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Search, Filter, Trash2, ArrowUpDown } from "lucide-react";
+import { Plus, Search, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -19,20 +19,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PartnerProfileDialog } from "./PartnerProfileDialog";
 
 import { Agency } from "@/types/agency";
+import { AddAgencyDialog } from "./AddAgencyDialog";
+import { SettingsDialog, loadModelSettings } from "./SettingsDialog";
 
 export const BentoDashboard = () => {
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedPartner, setSelectedPartner] = useState<Agency | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Partial for new agency creation
-  const [newAgency, setNewAgency] = useState({
-    name: "",
-    website: "",
-    description: "",
-  });
+  const [isEnriching, setIsEnriching] = useState(false);
 
   const { data: partners, isLoading } = useQuery({
     queryKey: ["partners"],
@@ -47,32 +43,98 @@ export const BentoDashboard = () => {
         console.error("Supabase error:", error);
         throw error;
       }
-      return data as unknown as Agency[];
+
+      // Deduplicate: agencies that are group members may appear multiple times
+      const seen = new Set<string>();
+      const deduped = (data as unknown as Agency[]).filter(agency => {
+        const key = agency.website
+          ? agency.website.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')
+          : agency.name.toLowerCase().trim();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return deduped;
     },
   });
 
-  const handleAddAgency = async () => {
-    try {
-      const { error } = await supabase
-        .from("agencies")
-        .insert([newAgency]);
 
-      if (error) throw error;
 
+  const handleEnrichData = async () => {
+    // Only enrich if partners exist
+    if (!partners || partners.length === 0) return;
+
+    const incompletePartners = partners.filter(
+      p => (p.website || p.name) && (!p.last_analyzed || !p.description || (!p.revenue_estimate && !!p.website) || p.name === p.website)
+    );
+
+    if (incompletePartners.length === 0) {
       toast({
-        title: "Success",
-        description: "Agency added successfully",
+        title: "Nothing to enrich",
+        description: "All agencies with websites already have details.",
       });
-      setIsAddDialogOpen(false);
-      setNewAgency({ name: "", website: "", description: "" });
-      queryClient.invalidateQueries({ queryKey: ["partners"] });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to add agency",
-        variant: "destructive",
-      });
+      return;
     }
+
+    setIsEnriching(true);
+    toast({
+      title: "Enrichment started",
+      description: `Updating ${incompletePartners.length} agencies...`,
+    });
+
+    let updatedCount = 0;
+
+    for (const partner of incompletePartners) {
+      try {
+        const { structured_extraction: model } = loadModelSettings();
+        const { data, error } = await supabase.functions.invoke('fetch-agency-details', {
+          body: {
+            url: partner.website || undefined,
+            name: !partner.website ? partner.name : undefined,
+            autoSelect: true,
+            model,
+          }
+        });
+
+        if (error) throw error;
+
+        // Prepare update object
+        const updateData: Partial<Agency> = {
+          name: data.name || partner.name,
+          website: data.website || partner.website,
+          description: data.description || partner.description,
+          revenue_estimate: data.revenue || partner.revenue_estimate,
+          last_analyzed: new Date().toISOString(),
+        };
+
+        // Add newly extracted comprehensive fields
+        if (data.clients) updateData.clients = data.clients;
+        if (data.awards) updateData.awards = data.awards;
+        if (data.directors) updateData.directors = data.directors;
+        if (data.partner_managers) updateData.partner_managers = data.partner_managers;
+        if (data.case_studies) updateData.case_studies = data.case_studies;
+        if (data.partners) updateData.partners = data.partners;
+        if (data.specializations) updateData.specializations = data.specializations;
+        if (data.platforms) updateData.platforms = data.platforms;
+
+        await supabase
+          .from('agencies')
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .update(updateData as any)
+          .eq('id', partner.id);
+
+        updatedCount++;
+      } catch (e) {
+        console.error(`Failed to enrich ${partner.name}:`, e);
+      }
+    }
+
+    setIsEnriching(false);
+    queryClient.invalidateQueries({ queryKey: ["partners"] });
+    toast({
+      title: "Enrichment complete",
+      description: `Successfully updated ${updatedCount} agencies.`,
+    });
   };
 
   const filteredPartners = partners?.filter(partner =>
@@ -93,18 +155,25 @@ export const BentoDashboard = () => {
           />
         </div>
 
-        <div className="flex gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <SettingsDialog />
+
           <Button
             variant="outline"
-            onClick={() => window.location.href = '/'}
-            className="flex items-center gap-2"
+            onClick={handleEnrichData}
+            disabled={isEnriching}
+            className="gap-2 shadow-sm hover:shadow-md transition-all duration-300"
           >
-            View as List
+            {isEnriching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-purple-500" />}
+            {isEnriching ? "Enriching..." : "Enrich Data"}
           </Button>
-          <Button onClick={() => setIsAddDialogOpen(true)} className="gap-2 shadow-lg hover:shadow-xl transition-all duration-300">
-            <Plus className="h-4 w-4" />
-            Add Agency
-          </Button>
+
+          <AddAgencyDialog>
+            <Button className="gap-2 shadow-lg hover:shadow-xl transition-all duration-300">
+              <Plus className="h-4 w-4" />
+              Add Agency
+            </Button>
+          </AddAgencyDialog>
         </div>
       </div>
 
@@ -115,12 +184,12 @@ export const BentoDashboard = () => {
           {filteredPartners?.map((partner) => (
             <Card
               key={partner.id}
-              className="group hover:scale-[1.02] transition-transform duration-300 cursor-pointer shadow-card hover:shadow-elegant border-border/50 bg-white"
+              className="group hover:scale-[1.02] transition-transform duration-300 cursor-pointer shadow-card hover:shadow-elegant border-border/50 bg-white overflow-hidden"
               onClick={() => setSelectedPartner(partner)}
             >
               <CardHeader className="space-y-1 pb-2">
                 <div className="flex justify-between items-start gap-2">
-                  <CardTitle className="text-lg font-bold text-foreground group-hover:text-primary transition-colors truncate">
+                  <CardTitle className="text-lg font-bold text-foreground group-hover:text-primary transition-colors truncate min-w-0">
                     {partner.name}
                   </CardTitle>
                   {partner.revenue_estimate && (
@@ -164,57 +233,20 @@ export const BentoDashboard = () => {
           ))}
 
           {/* Add New Card (Ghost) */}
-          <div
-            onClick={() => setIsAddDialogOpen(true)}
-            className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-200 rounded-xl hover:border-primary/50 hover:bg-slate-50/50 transition-colors cursor-pointer group min-h-[200px]"
-          >
-            <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-              <Plus className="h-6 w-6 text-slate-400 group-hover:text-primary" />
+          <AddAgencyDialog>
+            <div
+              className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-200 rounded-xl hover:border-primary/50 hover:bg-slate-50/50 transition-colors cursor-pointer group min-h-[200px]"
+            >
+              <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                <Plus className="h-6 w-6 text-slate-400 group-hover:text-primary" />
+              </div>
+              <span className="font-semibold text-slate-500 group-hover:text-primary">Add Agency</span>
             </div>
-            <span className="font-semibold text-slate-500 group-hover:text-primary">Add Agency</span>
-          </div>
+          </AddAgencyDialog>
         </div>
       )}
 
-      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add New Agency</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="name">Agency Name</Label>
-              <Input
-                id="name"
-                value={newAgency.name}
-                onChange={(e) => setNewAgency({ ...newAgency, name: e.target.value })}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="website">Website</Label>
-              <Input
-                id="website"
-                value={newAgency.website}
-                onChange={(e) => setNewAgency({ ...newAgency, website: e.target.value })}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                value={newAgency.description}
-                onChange={(e) => setNewAgency({ ...newAgency, description: e.target.value })}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleAddAgency}>Add Agency</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
 
       {selectedPartner && (
         <PartnerProfileDialog

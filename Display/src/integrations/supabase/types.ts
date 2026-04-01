@@ -24,8 +24,11 @@ export type Database = {
           revenue_estimate: string | null
           specializations: string[] | null
           platforms: string[] | null
-          clients: string[] | null
-          case_studies: string[] | null
+          clients: Json | null
+          case_studies: Json | null
+          directors: Json | null
+          awards: Json | null
+          partners: string[] | null
           last_analyzed: string | null
         }
         Insert: {
@@ -37,8 +40,11 @@ export type Database = {
           revenue_estimate?: string | null
           specializations?: string[] | null
           platforms?: string[] | null
-          clients?: string[] | null
-          case_studies?: string[] | null
+          clients?: Json | null
+          case_studies?: Json | null
+          directors?: Json | null
+          awards?: Json | null
+          partners?: string[] | null
           last_analyzed?: string | null
         }
         Update: {
@@ -50,8 +56,11 @@ export type Database = {
           revenue_estimate?: string | null
           specializations?: string[] | null
           platforms?: string[] | null
-          clients?: string[] | null
-          case_studies?: string[] | null
+          clients?: Json | null
+          case_studies?: Json | null
+          directors?: Json | null
+          awards?: Json | null
+          partners?: string[] | null
           last_analyzed?: string | null
         }
         Relationships: []

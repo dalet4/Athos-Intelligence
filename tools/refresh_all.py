@@ -8,7 +8,7 @@ from supabase import create_client, Client
 
 # Import our tools
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from scrape_agency import scrape_agency_crawler, scrape_url, find_subpages, extract_with_openai
+from scrape_agency import scrape_agency_crawler, scrape_url, find_subpages, extract_with_llm
 # We need to monkeytype hack or refactor scrape_agency to return object instead of print
 # Actually, let's just use subprocess for safety, or refactor scrape_agency to be importable.
 # I'll modify scrape_agency to have a helper that returns the dict.
@@ -50,8 +50,9 @@ def run_refresh():
                 with open("temp_batch.json", "r") as f:
                     content = f.read()
                     if content.strip():
-                        # Run store_data
-                        os.system(f"cat temp_batch.json | python3 tools/store_data.py")
+                        # Run extract_insights then store_data (B.L.A.S.T pipeline)
+                        cmd_extract = f"cat temp_batch.json | python3 tools/extract_insights.py --url {url} | python3 tools/store_data.py"
+                        os.system(cmd_extract)
                         print(f"✅ Updated {url}")
                     else:
                         print(f"⚠️  No output for {url}")

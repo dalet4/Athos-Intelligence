@@ -1,21 +1,39 @@
--- Run this in your Supabase SQL Editor (https://supabase.com/dashboard/project/.../sql)
+-- Consolidated Schema Migration Script
 
--- 1. Add 'partners' column (from Round 1)
+-- Add core intelligence columns
 ALTER TABLE agencies ADD COLUMN IF NOT EXISTS partners text[];
-
--- 2. Add 'revenue_estimate' (from Round 1)
 ALTER TABLE agencies ADD COLUMN IF NOT EXISTS revenue_estimate text;
-
--- 3. Add 'directors' (For Names, Roles, LinkedIn)
 ALTER TABLE agencies ADD COLUMN IF NOT EXISTS directors jsonb;
-
--- 4. Add 'awards' (For Name + Year)
 ALTER TABLE agencies ADD COLUMN IF NOT EXISTS awards jsonb;
-
--- 5. Add 'partner_page_url' (Deep link to Tech Partners)
 ALTER TABLE agencies ADD COLUMN IF NOT EXISTS partner_page_url text;
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS growth_signals jsonb;
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS social_mentions jsonb;
 
--- Verify
+-- Add corporate structure columns
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS parent_company text;
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS is_group_member boolean DEFAULT false;
+
+-- Phase 2: BuiltWith & Company Intelligence
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS tech_stack jsonb DEFAULT '[]'::jsonb;
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS headcount text;
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS office_locations text[] DEFAULT '{}'::text[];
+
+-- Add partner_managers column
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS partner_managers jsonb DEFAULT '[]'::jsonb;
+
+-- Add Lead Scoring columns (Restoration)
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS lead_score integer DEFAULT 0;
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS score_breakdown jsonb DEFAULT '{}'::jsonb;
+
+-- Recursive Discovery columns
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS sibling_agencies jsonb DEFAULT '[]'::jsonb;
+
+-- Add comments for documentation
+COMMENT ON COLUMN agencies.partner_managers IS 'Direct contacts for partnerships (Strategy, Execution, Tech, Marketing)';
+COMMENT ON COLUMN agencies.tech_stack IS 'Technology stack extracted via BuiltWith and AI';
+COMMENT ON COLUMN agencies.headcount IS 'Estimated or actual number of employees';
+
+-- Verification Query
 SELECT column_name, data_type 
 FROM information_schema.columns 
 WHERE table_name = 'agencies';

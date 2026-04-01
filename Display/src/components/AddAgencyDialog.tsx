@@ -9,13 +9,14 @@ import { useToast } from "@/hooks/use-toast";
 import {
     Dialog,
     DialogContent,
+    DialogDescription,
     DialogHeader,
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
 import { Plus, Loader2 } from "lucide-react";
 
-export function AddAgencyDialog() {
+export function AddAgencyDialog({ children }: { children?: React.ReactNode }) {
     const [open, setOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState({
@@ -24,6 +25,10 @@ export function AddAgencyDialog() {
         description: "",
         revenue_estimate: "",
     });
+
+    // Add state for company disambiguation
+    const [companyOptions, setCompanyOptions] = useState<{ title: string, company_number: string, address: string }[]>([]);
+    const [selectedCompanyNumber, setSelectedCompanyNumber] = useState<string>("");
 
     const queryClient = useQueryClient();
     const { toast } = useToast();
@@ -59,6 +64,8 @@ export function AddAgencyDialog() {
             queryClient.invalidateQueries({ queryKey: ["agencies"] });
             setOpen(false);
             setFormData({ name: "", website: "", description: "", revenue_estimate: "" });
+            setCompanyOptions([]);
+            setSelectedCompanyNumber("");
         } catch (error: any) {
             toast({
                 title: "Error",
@@ -73,14 +80,17 @@ export function AddAgencyDialog() {
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-                <Button className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    Add Agency
-                </Button>
+                {children || (
+                    <Button className="gap-2">
+                        <Plus className="h-4 w-4" />
+                        Add Agency
+                    </Button>
+                )}
             </DialogTrigger>
             <DialogContent className="max-w-md">
                 <DialogHeader>
                     <DialogTitle>Add New Agency</DialogTitle>
+                    <DialogDescription>Enter the agency details below. Use Auto-fill to fetch details from a website.</DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-2">
@@ -95,14 +105,162 @@ export function AddAgencyDialog() {
                     </div>
                     <div className="space-y-2">
                         <Label htmlFor="website">Website</Label>
-                        <Input
-                            id="website"
-                            type="url"
-                            value={formData.website}
-                            onChange={(e) => handleInputChange("website", e.target.value)}
-                            placeholder="https://example.com"
-                        />
+                        <div className="flex gap-2">
+                            <Input
+                                id="website"
+                                type="url"
+                                value={formData.website}
+                                onChange={(e) => handleInputChange("website", e.target.value)}
+                                placeholder="https://example.com"
+                            />
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={async () => {
+                                    if (!formData.website && !formData.name) {
+                                        toast({
+                                            title: "Name or URL required",
+                                            description: "Please enter a website URL or agency name first.",
+                                            variant: "destructive",
+                                        });
+                                        return;
+                                    }
+
+                                    setLoading(true);
+                                    try {
+                                        const { data, error } = await supabase.functions.invoke('fetch-agency-details', {
+                                            body: {
+                                                // Support taking from memory if a disambiguation selected, else generic
+                                                url: formData.website || undefined,
+                                                name: !formData.website ? formData.name : undefined,
+                                                companyNumber: selectedCompanyNumber || undefined
+                                            }
+                                        });
+
+                                        if (error) throw error;
+
+                                        // Handle disambiguation case
+                                        if (data?.action === 'select_company') {
+                                            setCompanyOptions(data.companies);
+                                            toast({
+                                                title: "Multiple matches found",
+                                                description: "Please select the correct company from the list below.",
+                                            });
+                                            return;
+                                        }
+
+                                        // Success fetching final data
+                                        setFormData(prev => ({
+                                            ...prev,
+                                            name: data.name || prev.name,
+                                            description: data.description || prev.description,
+                                        }));
+
+                                        // Clear out options if we arrived from them
+                                        setCompanyOptions([]);
+
+                                        toast({
+                                            title: "Details fetched",
+                                            description: "Agency details have been auto-filled.",
+                                        });
+
+                                    } catch (error: any) {
+                                        console.error('Fetch error:', error);
+                                        toast({
+                                            title: "Error fetching details",
+                                            description: error.message || "Could not fetch agency details.",
+                                            variant: "destructive",
+                                        });
+                                    } finally {
+                                        setLoading(false);
+                                    }
+                                }}
+                                disabled={loading || (!formData.website && !formData.name)}
+                            >
+                                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Auto-fill"}
+                            </Button>
+                        </div>
                     </div>
+
+                    {companyOptions.length > 0 && (
+                        <div className="space-y-3 pt-4 pb-4 border-t border-b">
+                            <Label className="text-sm font-semibold text-primary">
+                                Multiple matches found. Select correct company:
+                            </Label>
+                            <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
+                                {companyOptions.map((co) => (
+                                    <div
+                                        key={co.company_number}
+                                        className={`flex items-start space-x-3 p-3 rounded-md border cursor-pointer transition-colors ${selectedCompanyNumber === co.company_number
+                                                ? "border-primary bg-primary/5"
+                                                : "border-border hover:bg-slate-50"
+                                            }`}
+                                        onClick={() => setSelectedCompanyNumber(co.company_number)}
+                                    >
+                                        <div className="flex h-5 items-center">
+                                            <input
+                                                type="radio"
+                                                name="companySelection"
+                                                checked={selectedCompanyNumber === co.company_number}
+                                                onChange={() => setSelectedCompanyNumber(co.company_number)}
+                                                className="h-4 w-4 text-primary focus:ring-primary border-gray-300"
+                                            />
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-medium leading-none">{co.title}</span>
+                                            <span className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                                {co.address}
+                                            </span>
+                                            <span className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">
+                                                No. {co.company_number}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <Button
+                                type="button"
+                                className="w-full mt-2"
+                                disabled={!selectedCompanyNumber || loading}
+                                onClick={async () => {
+                                    setLoading(true);
+                                    try {
+                                        const { data, error } = await supabase.functions.invoke('fetch-agency-details', {
+                                            body: {
+                                                companyNumber: selectedCompanyNumber,
+                                            }
+                                        });
+
+                                        if (error) throw error;
+
+                                        setFormData(prev => ({
+                                            ...prev,
+                                            name: data.name || prev.name,
+                                            description: data.description || prev.description,
+                                        }));
+
+                                        setCompanyOptions([]);
+                                        toast({
+                                            title: "Details fetched",
+                                            description: "Agency details have been auto-filled.",
+                                        });
+                                    } catch (error: any) {
+                                        toast({
+                                            title: "Error fetching details",
+                                            description: error.message || "Failed to fetch company details",
+                                            variant: "destructive",
+                                        });
+                                    } finally {
+                                        setLoading(false);
+                                    }
+                                }}
+                            >
+                                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                Confirm Selection & Fetch
+                            </Button>
+                        </div>
+                    )}
+
                     <div className="space-y-2">
                         <Label htmlFor="revenue">Revenue Estimate</Label>
                         <Input
@@ -111,6 +269,7 @@ export function AddAgencyDialog() {
                             onChange={(e) => handleInputChange("revenue_estimate", e.target.value)}
                             placeholder="e.g. $1M - $5M"
                         />
+
                     </div>
                     <div className="space-y-2">
                         <Label htmlFor="description">Description</Label>

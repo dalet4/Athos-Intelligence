@@ -14,7 +14,10 @@ import {
   Filter,
   Grid3X3,
   List,
-  Loader2
+  Sparkles,
+  RefreshCw,
+  Loader2,
+  Globe
 } from "lucide-react";
 import { PartnerCard } from "./PartnerCard";
 import { EditPartnerDialog } from "./EditPartnerDialog";
@@ -30,6 +33,8 @@ import {
 } from "@/components/ui/select";
 import { Agency } from "@/types/agency";
 
+const filterableFields = ['specializations', 'platforms', 'revenue_estimate'];
+
 export function PartnerDashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilters, setActiveFilters] = useState<{ [key: string]: string }>({});
@@ -38,6 +43,7 @@ export function PartnerDashboard() {
   // Dialog States
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false); // [NEW]
+  const [isEnriching, setIsEnriching] = useState(false);
   const [selectedPartner, setSelectedPartner] = useState<Agency | null>(null);
 
   const { toast } = useToast();
@@ -60,7 +66,18 @@ export function PartnerDashboard() {
         });
         throw error;
       }
-      return data as unknown as Agency[]; // Cast to match our Type
+
+      // Deduplicate: agencies that are group members may appear multiple times
+      const seen = new Set<string>();
+      const deduped = (data as unknown as Agency[]).filter(agency => {
+        const key = agency.website
+          ? agency.website.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')
+          : agency.name.toLowerCase().trim();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return deduped;
     },
   });
 
@@ -81,7 +98,6 @@ export function PartnerDashboard() {
 
       const matchesFilters = Object.entries(activeFilters).every(([field, value]) => {
         if (value === 'all') return true;
-        // @ts-ignore
         return partner[field] === value;
       });
 
@@ -98,13 +114,12 @@ export function PartnerDashboard() {
     return { total, active, inactive, pending };
   }, [partners]);
 
-  const filterableFields = ['specializations', 'platforms', 'revenue_estimate'];
+  // filterableFields moved outside component
 
   const filterOptions = useMemo(() => {
     const options: { [key: string]: string[] } = {};
     filterableFields.forEach(field => {
       const allValues = partners.flatMap(p => {
-        // @ts-ignore
         const val = p[field];
         return Array.isArray(val) ? val : [val];
       }).filter(Boolean);
@@ -119,12 +134,159 @@ export function PartnerDashboard() {
     setIsProfileOpen(true);
   };
 
-  const handleEditPartner = (partner: any) => {
+  const handleEditPartner = (partner: Agency) => {
     setSelectedPartner(partner);
     setIsEditOpen(true);
   };
 
-  const handleSavePartner = async (updatedPartner: any) => {
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleSyncAll = async () => {
+    setIsSyncing(true);
+    toast({
+      title: "Syncing agencies",
+      description: "Triggering background refresh of all agency data...",
+    });
+
+    // In a real environment, this might call a backend endpoint. 
+    // Here we trigger handleEnrichData for all stale ones.
+    await handleEnrichData(true);
+    setIsSyncing(false);
+  };
+
+  const handleEnrichData = async (all = false) => {
+    const targetAgencies = all
+      ? partners
+      : partners.filter(p => (p.website || p.name) && (!p.last_analyzed || !p.description || (!p.revenue_estimate && !!p.website) || p.name === p.website));
+
+    if (targetAgencies.length === 0) {
+      toast({
+        title: "Nothing to enrich",
+        description: "All agencies already have up-to-date details.",
+      });
+      return;
+    }
+
+    setIsEnriching(true);
+    toast({
+      title: "Enrichment started",
+      description: `Updating ${targetAgencies.length} agencies...`,
+    });
+
+    let updatedCount = 0;
+
+    for (const partner of targetAgencies) {
+      try {
+        const { data, error } = await supabase.functions.invoke('fetch-agency-details', {
+          body: {
+            url: partner.website || undefined,
+            name: !partner.website ? partner.name : undefined,
+            autoSelect: true
+          }
+        });
+
+        if (error) throw error;
+
+        // Prepare update object with all enriched fields
+        const updateData: Partial<Agency> = {
+          name: data.name || partner.name,
+          website: data.website || partner.website,
+          description: data.description || partner.description,
+          revenue_estimate: data.revenue || partner.revenue_estimate,
+          last_analyzed: new Date().toISOString(),
+        };
+
+        // Add newly extracted comprehensive fields
+        if (data.clients) updateData.clients = data.clients;
+        if (data.awards) updateData.awards = data.awards;
+        if (data.directors) updateData.directors = data.directors;
+        if (data.partner_managers) updateData.partner_managers = data.partner_managers;
+        if (data.case_studies) updateData.case_studies = data.case_studies;
+        if (data.partners) updateData.partners = data.partners;
+        if (data.specializations) updateData.specializations = data.specializations;
+        if (data.platforms) updateData.platforms = data.platforms;
+
+        // Update database with comprehensive data
+        await supabase
+          .from('agencies')
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .update(updateData as any)
+          .eq('id', partner.id);
+
+        updatedCount++;
+
+        console.log(`Enriched ${partner.name || partner.website}: ${Object.keys(updateData).join(', ')}`);
+      } catch (e) {
+        console.error(`Failed to enrich ${partner.name}:`, e);
+      }
+    }
+
+    setIsEnriching(false);
+    queryClient.invalidateQueries({ queryKey: ["agencies"] });
+    toast({
+      title: "Enrichment complete",
+      description: `Successfully updated ${updatedCount} agencies.`,
+    });
+  };
+
+  const handleDiscoverExternal = async () => {
+    if (!searchTerm) return;
+
+    setIsEnriching(true);
+    toast({
+      title: "Searching Web",
+      description: `Looking for details for "${searchTerm}"...`,
+    });
+
+    try {
+      const { data, error } = await supabase.functions.invoke('fetch-agency-details', {
+        body: {
+          name: searchTerm,
+          autoSelect: true
+        }
+      });
+
+      if (error) throw error;
+
+      // Add to platform
+      const { data: insertData, error: insertError } = await supabase
+        .from('agencies')
+        .insert({
+          name: data.name || searchTerm,
+          website: data.website,
+          description: data.description,
+          revenue_estimate: data.revenue,
+          specializations: data.specializations,
+          platforms: data.platforms,
+          clients: data.clients,
+          awards: data.awards,
+          directors: data.directors,
+          last_analyzed: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      toast({
+        title: "Agency Discovered",
+        description: `Successfully added ${data.name || searchTerm} to the platform.`,
+      });
+
+      setSearchTerm('');
+      queryClient.invalidateQueries({ queryKey: ["agencies"] });
+    } catch (e: any) {
+      toast({
+        title: "Discovery Failed",
+        description: e.message || "Could not find agency details.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsEnriching(false);
+    }
+  };
+
+  const handleSavePartner = async (updatedPartner: Agency) => {
     // ... (Update logic same)
     try {
       const { error } = await supabase
@@ -140,18 +302,31 @@ export function PartnerDashboard() {
       if (error) throw error;
       toast({ title: "Partner updated", description: `${updatedPartner.name} updated.` });
       queryClient.invalidateQueries({ queryKey: ["agencies"] });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     }
   };
 
-  const handleDeletePartner = async (partnerId: string) => {
-    // ... (Delete logic same)
+  const handleDeletePartner = async (partnerToDelete: Agency) => {
+    if (!confirm(`Are you sure you want to delete "${partnerToDelete.name || partnerToDelete.website}"? This action cannot be undone.`)) {
+      return;
+    }
+
     try {
-      const { error } = await supabase.from('agencies').delete().eq('id', partnerId);
+      const { error } = await supabase
+        .from('agencies')
+        .delete()
+        .eq('id', partnerToDelete.id);
+
       if (error) throw error;
-      toast({ title: "Partner deleted", description: "Removed from database.", variant: "destructive" });
+
+      toast({
+        title: "Partner deleted",
+        description: `${partnerToDelete.name || partnerToDelete.website} has been deleted.`
+      });
       queryClient.invalidateQueries({ queryKey: ["agencies"] });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     }
@@ -235,6 +410,26 @@ export function PartnerDashboard() {
         <div className="flex gap-2">
           {/* View Mode Toggles (Grid/List) */}
           <div className="flex border rounded-md mr-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSyncAll}
+              className="gap-2"
+              disabled={isSyncing}
+            >
+              {isSyncing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Sync All
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleEnrichData(false)}
+              className="gap-2"
+              disabled={isEnriching}
+            >
+              {isEnriching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {isEnriching ? "Enriching..." : "Enrich Incomplete"}
+            </Button>
             <Button variant="outline" size="sm" onClick={() => window.location.href = '/bento'} className="gap-2">
               <Grid3X3 className="h-4 w-4" />
               Try Bento Grid
@@ -251,9 +446,16 @@ export function PartnerDashboard() {
             <Users className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-semibold mb-2">No partners found</h3>
             <p className="text-muted-foreground text-center mb-4">
-              {searchTerm || Object.values(activeFilters).some(f => f !== 'all') ? "Try adjusting filters" : "Add your first agency"}
+              {searchTerm || Object.values(activeFilters).some(f => f !== 'all')
+                ? `No results for "${searchTerm}". Would you like to check the web?`
+                : "Add your first agency"}
             </p>
-            {!searchTerm && !Object.values(activeFilters).some(f => f !== 'all') && <AddAgencyDialog />}
+            {searchTerm ? (
+              <Button onClick={handleDiscoverExternal} className="gap-2" disabled={isEnriching}>
+                {isEnriching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+                Discover External Agency
+              </Button>
+            ) : !Object.values(activeFilters).some(f => f !== 'all') && <AddAgencyDialog />}
           </CardContent>
         </Card>
       ) : (
@@ -262,7 +464,9 @@ export function PartnerDashboard() {
             <div key={partner.id} className="animate-slide-up h-full">
               <PartnerCard
                 partner={partner}
-                onViewProfile={handleViewProfile} // [CHANGED] Pass handler
+                onViewProfile={handleViewProfile}
+                onEdit={handleEditPartner}
+                onDelete={handleDeletePartner}
               />
             </div>
           ))}
