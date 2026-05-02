@@ -15,7 +15,6 @@ from cost_manager import CostManager
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 TEAM_PAGE_PATTERN = re.compile(
@@ -124,7 +123,7 @@ def scrape_url(url: str):
 
 def find_subpages(home_markdown, base_url, run_id: Optional[str] = None, model: Optional[str] = None):
     """Uses LLM to find About/Team/Partners links in the homepage markdown."""
-    api_key = OPENROUTER_API_KEY or OPENAI_API_KEY
+    api_key = OPENROUTER_API_KEY
     if not api_key:
         return []
 
@@ -133,12 +132,8 @@ def find_subpages(home_markdown, base_url, run_id: Optional[str] = None, model: 
         "Content-Type": "application/json"
     }
 
-    if OPENROUTER_API_KEY:
-        api_url = "https://openrouter.ai/api/v1/chat/completions"
-        model_name = model or "google/gemini-flash-1.5"
-    else:
-        api_url = "https://api.openai.com/v1/chat/completions"
-        model_name = model or "gpt-4o-mini"
+    api_url = "https://openrouter.ai/api/v1/chat/completions"
+    model_name = model or "google/gemini-flash-1.5"
     
     prompt = f"""
     Analyze the markdown links from this homepage and identify the URLs for:
@@ -197,9 +192,9 @@ def extract_with_llm(content, run_id: Optional[str] = None, model: Optional[str]
     """
     Sends massive context to LLM to extract structured JSON matching Expanded Schema.
     """
-    api_key = OPENROUTER_API_KEY or OPENAI_API_KEY
+    api_key = OPENROUTER_API_KEY
     if not api_key:
-        return {"error": "Missing OPENROUTER_API_KEY or OPENAI_API_KEY"}
+        return {"error": "Missing OPENROUTER_API_KEY"}
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -242,13 +237,8 @@ def extract_with_llm(content, run_id: Optional[str] = None, model: Optional[str]
     Return ONLY valid JSON.
     """
     
-    # OpenRouter requires an extra header for routing if we use it directly via requests
-    if OPENROUTER_API_KEY:
-        api_url = "https://openrouter.ai/api/v1/chat/completions"
-        model_name = model or "openai/gpt-4o-mini"
-    else:
-        api_url = "https://api.openai.com/v1/chat/completions"
-        model_name = model or "gpt-4o-mini"
+    api_url = "https://openrouter.ai/api/v1/chat/completions"
+    model_name = model or "openai/gpt-4o-mini"
 
     payload = {
         "model": model_name, 

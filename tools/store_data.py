@@ -2,6 +2,8 @@ import os
 import sys
 import argparse
 import json
+import hashlib
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -136,7 +138,9 @@ def store_data(data: dict):
             "headcount": data.get("headcount"),
             "office_locations": data.get("office_locations", []),
             "sibling_agencies": data.get("sibling_agencies", []),
-            "last_analyzed": data.get("last_analyzed") 
+            "last_analyzed": data.get("last_analyzed"),
+            "content_hash": hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest(),
+            "last_scraped_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Upsert

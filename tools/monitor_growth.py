@@ -11,7 +11,6 @@ from cost_manager import CostManager
 # Load .env
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Try imports for extensibility
 try:
@@ -24,12 +23,10 @@ class GrowthMonitor:
     def __init__(self):
         self.ddgs = DDGS() if HAS_DDGS else None
         
-        api_key = OPENROUTER_API_KEY or OPENAI_API_KEY
-        base_url = "https://openrouter.ai/api/v1" if OPENROUTER_API_KEY else None
-        self.model = "openai/gpt-4o-mini" # Use a mini model for cheaper classification
-        
-        if api_key:
-            self.client = OpenAI(base_url=base_url, api_key=api_key)
+        self.model = "openai/gpt-4o-mini"
+
+        if OPENROUTER_API_KEY:
+            self.client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY)
         else:
             self.client = None
 

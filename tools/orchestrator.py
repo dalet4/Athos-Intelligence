@@ -6,7 +6,23 @@ import subprocess
 import json
 import logging
 import uuid
+import hashlib
+from dotenv import load_dotenv
+from supabase import create_client
 from cost_manager import CostManager
+
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
+_supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_ROLE_KEY"))
+
+def get_existing_hash(website: str) -> str | None:
+    """Fetch stored content_hash for a website from Supabase."""
+    try:
+        res = _supabase.table("agencies").select("content_hash").eq("website", website).limit(1).execute()
+        if res.data:
+            return res.data[0].get("content_hash")
+    except Exception:
+        pass
+    return None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -75,6 +91,13 @@ def orchestrate(url: str, model: str = None):
         return
 
     logging.info(f"✅ Scrape successful. Length: {len(markdown_content)} chars")
+
+    # Hash check — skip extraction if content unchanged
+    new_hash = hashlib.sha256(markdown_content.encode()).hexdigest()
+    existing_hash = get_existing_hash(url)
+    if existing_hash and existing_hash == new_hash:
+        logging.info("⏭️  Content unchanged (hash match). Skipping extraction — no LLM cost incurred.")
+        return
 
     # Step 2: Blueprint/Architect (Extract)
     logging.info("--- Phase 2: Extraction (Blueprint) ---")

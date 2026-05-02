@@ -64,8 +64,10 @@ export const BentoDashboard = () => {
     // Only enrich if partners exist
     if (!partners || partners.length === 0) return;
 
+    const isEmpty = (v: unknown) => v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
+    const ENRICHABLE_FIELDS = ['description', 'revenue_estimate', 'clients', 'awards', 'directors', 'partner_managers', 'case_studies', 'partners', 'specializations', 'platforms'] as const;
     const incompletePartners = partners.filter(
-      p => (p.website || p.name) && (!p.last_analyzed || !p.description || (!p.revenue_estimate && !!p.website) || p.name === p.website)
+      p => (p.website || p.name) && ENRICHABLE_FIELDS.some(f => isEmpty(p[f as keyof Agency]))
     );
 
     if (incompletePartners.length === 0) {
@@ -93,29 +95,25 @@ export const BentoDashboard = () => {
             name: !partner.website ? partner.name : undefined,
             autoSelect: true,
             model,
+            existingData: partner,
           }
         });
 
         if (error) throw error;
+        if (data?._skipped) continue;
 
-        // Prepare update object
-        const updateData: Partial<Agency> = {
-          name: data.name || partner.name,
-          website: data.website || partner.website,
-          description: data.description || partner.description,
-          revenue_estimate: data.revenue || partner.revenue_estimate,
-          last_analyzed: new Date().toISOString(),
-        };
-
-        // Add newly extracted comprehensive fields
-        if (data.clients) updateData.clients = data.clients;
-        if (data.awards) updateData.awards = data.awards;
-        if (data.directors) updateData.directors = data.directors;
-        if (data.partner_managers) updateData.partner_managers = data.partner_managers;
-        if (data.case_studies) updateData.case_studies = data.case_studies;
-        if (data.partners) updateData.partners = data.partners;
-        if (data.specializations) updateData.specializations = data.specializations;
-        if (data.platforms) updateData.platforms = data.platforms;
+        // Only write back fields that were missing — never overwrite existing data
+        const updateData: Partial<Agency> = { last_analyzed: new Date().toISOString() };
+        if (!partner.description && data.description) updateData.description = data.description;
+        if (!partner.revenue_estimate && data.revenue_estimate) updateData.revenue_estimate = data.revenue_estimate;
+        if ((!partner.clients || partner.clients.length === 0) && data.clients?.length) updateData.clients = data.clients;
+        if ((!partner.awards || partner.awards.length === 0) && data.awards?.length) updateData.awards = data.awards;
+        if ((!partner.directors || partner.directors.length === 0) && data.directors?.length) updateData.directors = data.directors;
+        if ((!partner.partner_managers || partner.partner_managers.length === 0) && data.partner_managers?.length) updateData.partner_managers = data.partner_managers;
+        if ((!partner.case_studies || partner.case_studies.length === 0) && data.case_studies?.length) updateData.case_studies = data.case_studies;
+        if ((!partner.partners || partner.partners.length === 0) && data.partners?.length) updateData.partners = data.partners;
+        if ((!partner.specializations || partner.specializations.length === 0) && data.specializations?.length) updateData.specializations = data.specializations;
+        if ((!partner.platforms || partner.platforms.length === 0) && data.platforms?.length) updateData.platforms = data.platforms;
 
         await supabase
           .from('agencies')

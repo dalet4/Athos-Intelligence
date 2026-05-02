@@ -11,7 +11,7 @@ Deno.serve(async (req: Request) => {
     }
 
     try {
-        let { url, name, companyNumber, autoSelect, model: requestedModel } = await req.json();
+        let { url, name, companyNumber, autoSelect, model: requestedModel, existingData } = await req.json();
 
         if (!url && !name && !companyNumber) {
             return new Response(
@@ -20,6 +20,20 @@ Deno.serve(async (req: Request) => {
                     status: 400,
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 }
+            )
+        }
+
+        // Determine which fields are missing from existing data
+        const isEmpty = (v: any) => v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
+        const ENRICHABLE_FIELDS = ['description', 'revenue_estimate', 'clients', 'awards', 'directors', 'partner_managers', 'case_studies', 'partners', 'specializations', 'platforms'];
+        const missingFields = existingData
+            ? ENRICHABLE_FIELDS.filter(f => isEmpty(existingData[f]))
+            : ENRICHABLE_FIELDS;
+
+        if (existingData && missingFields.length === 0) {
+            return new Response(
+                JSON.stringify({ _skipped: true, reason: 'All fields already populated' }),
+                { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
             )
         }
 
@@ -74,54 +88,43 @@ Deno.serve(async (req: Request) => {
                 }
             }
 
-            const apiKey = Deno.env.get('OPENAI_API_KEY') || Deno.env.get('OPENROUTER_API_KEY');
+            const apiKey = Deno.env.get('OPENROUTER_API_KEY');
             if (!apiKey) {
-                throw new Error("Missing OPENAI_API_KEY environment variable. Make sure it is set in your Supabase project.");
+                throw new Error("Missing OPENROUTER_API_KEY. Set it in your Supabase project secrets.");
             }
 
-            const isOpenRouter = !!Deno.env.get('OPENROUTER_API_KEY');
-            const apiUrl = isOpenRouter ? "https://openrouter.ai/api/v1/chat/completions" : "https://api.openai.com/v1/chat/completions";
-            const defaultModel = isOpenRouter ? "openai/gpt-4o-mini" : "gpt-4o-mini";
-            const model = requestedModel || defaultModel;
+            const apiUrl = "https://openrouter.ai/api/v1/chat/completions";
+            const model = requestedModel || "openai/gpt-4o-mini";
+
+            const fieldSchemas: Record<string, string> = {
+                description: `"description": "Short summary (max 200 chars)"`,
+                revenue_estimate: `"revenue_estimate": "$XM-$YM (estimate based on team size ~$150k/head)"`,
+                clients: `"clients": [{"name": "Client Name"}]`,
+                awards: `"awards": [{"name": "Award Name", "year": "Year"}]`,
+                directors: `"directors": [{"name": "Full Name", "role": "Job Title", "linkedin_url": "URL or null"}]`,
+                partner_managers: `"partner_managers": [{"name": "Full Name", "role": "Job Title", "linkedin_url": "URL or null"}]`,
+                case_studies: `"case_studies": [{"title": "Title", "url": "URL or null"}]`,
+                partners: `"partners": ["technology partner names, e.g. Shopify, Klaviyo, Yotpo"]`,
+                specializations: `"specializations": ["list of services offered"]`,
+                platforms: `"platforms": ["Shopify", "Magento", "Salesforce", "etc"]`,
+            };
+
+            const schemaLines = missingFields.map(f => fieldSchemas[f]).filter(Boolean).join(',\n    ');
 
             const systemPrompt = `
 You are an expert Commerce Intelligence Analyst.
-Your goal is to extract structured JSON data from the agency website text (if provided) or from your general knowledge of the agency industry.
-
-Extract the following JSON structure strictly. Do not return markdown, just raw JSON.
+Extract ONLY the following missing fields from the agency website text. Return raw JSON with only these keys — do not include fields that already have data.
 
 {
-    "name": "Agency Name",
-    "website": "URL (e.g. https://example.com)",
-    "description": "Short summary (max 200 chars)",
-    "revenue": "$XM-$YM",
-    "clients": [
-        {"name": "Client Name"}
-    ],
-    "awards": [
-        {"name": "Award Name", "year": "Year"}
-    ],
-    "directors": [
-        {"name": "Full Name", "role": "Job Title", "linkedin_url": "URL"}
-    ],
-    "case_studies": [
-        {"title": "Title", "url": "URL"}
-    ],
-    "partner_managers": [
-        {"name": "Full Name", "role": "Job Title", "linkedin_url": "URL"}
-    ],
-    "partners": ["List", "of", "technology", "partners", "e.g. Shopify, BigCommerce"],
-    "specializations": ["List", "of", "services"],
-    "platforms": ["Shopify", "Magento", "Salesforce"]
+    ${schemaLines}
 }
 
-CRITICAL INSTRUCTIONS:
-1. For 'revenue', ESTIMATE based on employee count/team size (~$150k/head) and clients. Return a range string e.g. "$5M-$10M". Look for "team of 50+" etc.
-2. Directors: Extract key leadership (Founder, CEO, Director, Head of). Look for names in the text.
-3. Partners: Look for technology partners (Shopify, BigCommerce, Klaviyo, Yotpo, Gorgias, Recharge, etc.).
-4. Return ONLY valid JSON, no backticks, no markdown blocks.
-5. Clients: If you spot names of brands they work with.
-6. Partner Managers: Deeply scan for people whose job titles indicate they manage partnerships, alliances, channel relations, or ecosystem growth (e.g., "Partnerships Manager", "Head of Alliances", "Partner Lead"). Extract their Name, Role, and LinkedIn URL if available.
+INSTRUCTIONS:
+- directors: Extract Founder, CEO, Director, Head of roles only.
+- partner_managers: Look for Partnerships Manager, Head of Alliances, Partner Lead, Channel roles.
+- platforms: Only from: Shopify, BigCommerce, Magento, Salesforce Commerce Cloud, WooCommerce, Adobe Commerce, Centra, Shopware, and similar ecommerce platforms.
+- Return ONLY valid JSON. No backticks, no markdown.
+- If a field cannot be found, return an empty array [] or null.
 `;
 
             console.log("Calling LLM API for extraction...");

@@ -77,42 +77,74 @@ def extract_insights(markdown_content: str, website_url: str, run_id: Optional[s
         api_key=api_key,
     )
 
-    prompt = f"""
-    You are an expert Commerce Intelligence Analyst.
-    Your goal is to extract structured data from the agency website content.
-    
-    Website URL: {website_url}
-    
-    Agency Content:
-    {markdown_content[:25000]} 
-    
-    Extract the following JSON structure strictly.
-    
-    CRITICAL INSTRUCTIONS:
-    1. **Growth Signals**: Look for a "Careers" section or mentions of hiring. Count the open roles. Extract specific role titles.
-    2. **News**: Look for "Press", "News", or "Blog" for recent (2024-2025) achievements, awards, or expansions.
-    3. **Competitor Intelligence**: deeply scan for mentions of technology partnerships. 
-       - Specifically look for: Klaviyo, Yotpo, Gorgias, Recharge, Attentive, Postscript, Okendo, Reviews.io, Loop Returns.
-       - These are our DIRECT COMPETITORS. If they are mentioned as partners, ensure they are listed in 'competitor_partnerships'.
-       - Also detailed platforms: Shopify, Magento, BigCommerce, Salesforce.
-    4. **Valuation/Revenue**: For 'revenue_estimate', strictly ESTIMATE based on employee count (~$150k/head) and client tier. Return a range string e.g. "$5M-$10M". DO NOT leave it blank if you can infer team size.
-    5. **Description**: Write a `description` of at least 100 characters summarising the agency's focus, key services, and target market. Synthesise from all available content — do not leave this short or generic.
-    6. **Company Intelligence**:
-       - **Headcount**: Look for mentions of team size or "Our team of X experts".
-       - **Office Locations**: Extract primary office cities.
-       - **Tech Stack**: Beyond platforms, look for specific tech mentioned (e.g. Headless, Gatsby, Vue, Netlify, Next.js, React, Hydrogen). If no tech is explicitly named, infer from the services language (e.g. "headless commerce" → Headless; "custom Shopify development" → Shopify, React). Always return at least 2 items if the agency does any technical work.
-    7. **Partnership Roles**: Deeply scan for people whose job titles indicate they manage partnerships, alliances, channel relations, or ecosystem growth. Look for titles like "Partnerships Manager", "Head of Alliances", "Partner Lead", "Channel Manager", or "Ecommerce Partnerships". Extract their Name, Role, and LinkedIn URL if available.
-    8. **Hiring/Growth**: Deeply analyze the "Careers" or "Job" sections found in the content to get an accurate count and specific titles for hiring roles.
-    9. **Group/Parent Company**: Identify if the agency is part of a larger group (e.g., MSQ, WPP, Publicis, Dentsu, various private equity groups). Look for keywords like "Part of [Group]", "subsidiary of", "an [Group] agency", or "our parent company [Group]". If found, set 'is_part_of_group' to true and provide the 'parent_company' name.
-    10. **Leadership/Directors**: Scan "About", "Team", or "Meet the Team" sections for senior leadership. Extract anyone with titles like "Founder", "Co-Founder", "CEO", "Managing Director", "Director", "CTO", "COO", or "Head of [Department]" into the `directors` field with their full name, role, and LinkedIn URL if visible. This field must not be left empty if any named individuals appear on the site.
-    """
+    system_prompt = """You are an expert Commerce Intelligence Analyst specialising in the UK/global ecommerce agency ecosystem.
+
+Your task is to extract structured intelligence from scraped agency website content. You produce JSON only — no commentary.
+
+## Extraction rules
+
+**name / description / website**
+- description must be ≥100 characters. Synthesise the agency's focus, key services, and target market from all available content. Never leave it generic ("a digital agency").
+
+**specializations / platforms / tech_stack**
+- specializations: service lines e.g. ["SEO", "PPC", "CRO", "Email Marketing"]
+- platforms: commerce platforms e.g. ["Shopify", "Magento", "BigCommerce", "Salesforce Commerce Cloud"]
+- tech_stack: specific technologies beyond platforms e.g. ["React", "Next.js", "Hydrogen", "Headless", "Gatsby", "Netlify", "Vue"]
+  - If no tech is explicitly named, infer from service language: "headless commerce" → Headless; "custom Shopify development" → Shopify, React
+  - Always return ≥2 items if the agency does any technical work
+
+**competitor_partnerships**
+- Scan deeply for technology partner mentions. Flag any of these as competitors: Klaviyo, Yotpo, Gorgias, Recharge, Attentive, Postscript, Okendo, Reviews.io, Loop Returns
+- These are the intelligence buyer's direct competitors — be thorough
+
+**revenue_estimate**
+- Estimate from headcount using ~$150k/employee/year and client tier signals
+- Always return a range string if team size can be inferred e.g. "$5M–$10M"
+- Never leave null if headcount or team signals are present
+
+**headcount**
+- Look for "Our team of X", "X+ experts", LinkedIn employee counts, or career page job volume as a proxy
+- Return a range string e.g. "50–100"
+
+**open_roles_count / hiring_roles**
+- Count every distinct open role in Careers/Jobs sections
+- Extract specific titles e.g. ["Senior Shopify Developer", "Paid Media Manager"]
+
+**directors**
+- Scan About/Team/Meet the Team sections
+- Include anyone titled: Founder, Co-Founder, CEO, MD, Director, CTO, COO, Head of [Department]
+- Must not be empty if any named individuals appear on the site
+
+**partner_managers**
+- People whose titles indicate partnerships, alliances, or channel management
+- Titles: "Partnerships Manager", "Head of Alliances", "Partner Lead", "Channel Manager", "Ecommerce Partnerships"
+
+**parent_company / is_part_of_group**
+- Look for: "Part of [Group]", "subsidiary of", "an [Group] agency", "our parent company"
+- Known groups: MSQ, WPP, Publicis, Dentsu, Havas, and private equity roll-ups
+
+**recent_news**
+- Headlines from Press/News/Blog sections dated 2024–2025 only
+
+**clients / case_studies**
+- Extract named clients and any quantified results e.g. "20% revenue growth", "3× ROAS"
+
+## Accuracy rules
+- Never hallucinate. If information is absent, use null or empty list — do not guess.
+- Do not infer competitor partnerships unless explicitly stated.
+- Only extract directors and partner managers whose names appear in the content."""
+
+    user_prompt = f"""Website URL: {website_url}
+
+Agency Content:
+{markdown_content[:25000]}"""
 
     try:
         completion = client.chat.completions.create(
-            model=model, # Or generic supported model
+            model=model,
             messages=[
-                {"role": "system", "content": "You are a helpful assistant that extracts structured JSON."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
             ],
             response_format={
                 "type": "json_schema", 
