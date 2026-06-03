@@ -13,6 +13,13 @@ const Index = () => {
         <div className="relative gradient-hero">
           <div className="container mx-auto px-4 py-16">
             <div className="text-center text-white">
+              <div className="flex justify-center mb-6">
+                <img
+                  src="/brand/athos-logo.svg"
+                  alt="Athos Commerce"
+                  className="h-10 brightness-0 invert"
+                />
+              </div>
               <h1 className="text-4xl md:text-5xl font-bold mb-4">
                 Partner Intelligence
               </h1>
