@@ -1,5 +1,6 @@
 import { PartnerDashboard } from "@/components/PartnerDashboard";
 import heroImage from "@/assets/hero-dashboard.jpg";
+import athosLogo from "@/assets/athos-logo.svg";
 
 const Index = () => {
   return (
@@ -15,7 +16,7 @@ const Index = () => {
             <div className="text-center text-white">
               <div className="flex justify-center mb-6">
                 <img
-                  src="/brand/athos-logo.svg"
+                  src={athosLogo}
                   alt="Athos Commerce"
                   className="h-10 brightness-0 invert"
                 />
