@@ -18,7 +18,7 @@ const BentoIndex = () => {
                 <img
                   src={athosLogo}
                   alt="Athos Commerce"
-                  className="h-10 brightness-0 invert"
+                  className="h-10"
                 />
               </div>
               <h1 className="text-4xl md:text-5xl font-bold mb-4">
