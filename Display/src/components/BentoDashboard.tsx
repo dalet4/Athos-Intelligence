@@ -1,22 +1,14 @@
-import { useState, useEffect } from "react";
-import { Plus, Search, Sparkles, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { Plus, Search, Sparkles, Loader2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PartnerProfileDialog } from "./PartnerProfileDialog";
+import { EditPartnerDialog } from "./EditPartnerDialog";
 
 import { Agency } from "@/types/agency";
 import { AddAgencyDialog } from "./AddAgencyDialog";
@@ -24,6 +16,7 @@ import { SettingsDialog, loadModelSettings } from "./SettingsDialog";
 
 export const BentoDashboard = () => {
   const [selectedPartner, setSelectedPartner] = useState<Agency | null>(null);
+  const [editPartner, setEditPartner] = useState<Agency | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -33,18 +26,13 @@ export const BentoDashboard = () => {
   const { data: partners, isLoading } = useQuery({
     queryKey: ["partners"],
     queryFn: async () => {
-      console.log("Fetching partners...");
       const { data, error } = await supabase
         .from("agencies")
         .select("*")
         .order("name");
 
-      if (error) {
-        console.error("Supabase error:", error);
-        throw error;
-      }
+      if (error) throw error;
 
-      // Deduplicate: agencies that are group members may appear multiple times
       const seen = new Set<string>();
       const deduped = (data as unknown as Agency[]).filter(agency => {
         const key = agency.website
@@ -58,10 +46,7 @@ export const BentoDashboard = () => {
     },
   });
 
-
-
   const handleEnrichData = async () => {
-    // Only enrich if partners exist
     if (!partners || partners.length === 0) return;
 
     const isEmpty = (v: unknown) => v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
@@ -71,18 +56,12 @@ export const BentoDashboard = () => {
     );
 
     if (incompletePartners.length === 0) {
-      toast({
-        title: "Nothing to enrich",
-        description: "All agencies with websites already have details.",
-      });
+      toast({ title: "Nothing to enrich", description: "All agencies already have details." });
       return;
     }
 
     setIsEnriching(true);
-    toast({
-      title: "Enrichment started",
-      description: `Updating ${incompletePartners.length} agencies...`,
-    });
+    toast({ title: "Enrichment started", description: `Updating ${incompletePartners.length} agencies...` });
 
     let updatedCount = 0;
 
@@ -90,19 +69,12 @@ export const BentoDashboard = () => {
       try {
         const { structured_extraction: model } = loadModelSettings();
         const { data, error } = await supabase.functions.invoke('fetch-agency-details', {
-          body: {
-            url: partner.website || undefined,
-            name: !partner.website ? partner.name : undefined,
-            autoSelect: true,
-            model,
-            existingData: partner,
-          }
+          body: { url: partner.website || undefined, name: !partner.website ? partner.name : undefined, autoSelect: true, model, existingData: partner }
         });
 
         if (error) throw error;
         if (data?._skipped) continue;
 
-        // Only write back fields that were missing — never overwrite existing data
         const updateData: Partial<Agency> = { last_analyzed: new Date().toISOString() };
         if (!partner.description && data.description) updateData.description = data.description;
         if (!partner.revenue_estimate && data.revenue_estimate) updateData.revenue_estimate = data.revenue_estimate;
@@ -115,12 +87,7 @@ export const BentoDashboard = () => {
         if ((!partner.specializations || partner.specializations.length === 0) && data.specializations?.length) updateData.specializations = data.specializations;
         if ((!partner.platforms || partner.platforms.length === 0) && data.platforms?.length) updateData.platforms = data.platforms;
 
-        await supabase
-          .from('agencies')
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .update(updateData as any)
-          .eq('id', partner.id);
-
+        await supabase.from('agencies').update(updateData as any).eq('id', partner.id);
         updatedCount++;
       } catch (e) {
         console.error(`Failed to enrich ${partner.name}:`, e);
@@ -129,10 +96,27 @@ export const BentoDashboard = () => {
 
     setIsEnriching(false);
     queryClient.invalidateQueries({ queryKey: ["partners"] });
-    toast({
-      title: "Enrichment complete",
-      description: `Successfully updated ${updatedCount} agencies.`,
-    });
+    toast({ title: "Enrichment complete", description: `Successfully updated ${updatedCount} agencies.` });
+  };
+
+  const handleSaveEdit = async (updatedPartner: Agency) => {
+    try {
+      const { error } = await supabase
+        .from('agencies')
+        .update({
+          name: updatedPartner.name,
+          website: updatedPartner.website,
+          description: updatedPartner.description,
+          revenue_estimate: updatedPartner.revenue_estimate,
+        })
+        .eq('id', updatedPartner.id);
+
+      if (error) throw error;
+      toast({ title: "Saved", description: `${updatedPartner.name} updated.` });
+      queryClient.invalidateQueries({ queryKey: ["partners"] });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
   };
 
   const filteredPartners = partners?.filter(partner =>
@@ -155,7 +139,6 @@ export const BentoDashboard = () => {
 
         <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           <SettingsDialog />
-
           <Button
             variant="outline"
             onClick={handleEnrichData}
@@ -165,7 +148,6 @@ export const BentoDashboard = () => {
             {isEnriching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-purple-500" />}
             {isEnriching ? "Enriching..." : "Enrich Data"}
           </Button>
-
           <AddAgencyDialog>
             <Button className="gap-2 shadow-lg hover:shadow-xl transition-all duration-300">
               <Plus className="h-4 w-4" />
@@ -190,11 +172,22 @@ export const BentoDashboard = () => {
                   <CardTitle className="text-lg font-bold text-foreground group-hover:text-primary transition-colors truncate min-w-0">
                     {partner.name}
                   </CardTitle>
-                  {partner.revenue_estimate && (
-                    <Badge variant="outline" className="text-[10px] font-bold text-green-700 bg-green-50 border-green-200 uppercase shrink-0">
-                      {partner.revenue_estimate.split('(')[0].trim()}
-                    </Badge>
-                  )}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {partner.revenue_estimate && (
+                      <Badge variant="outline" className="text-[10px] font-bold text-green-700 bg-green-50 border-green-200 uppercase">
+                        {partner.revenue_estimate.split('(')[0].trim()}
+                      </Badge>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => { e.stopPropagation(); setEditPartner(partner); }}
+                      title="Edit"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
                 {partner.specializations && partner.specializations.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2">
@@ -210,8 +203,6 @@ export const BentoDashboard = () => {
                 <p className="text-sm text-slate-500 line-clamp-2 min-h-[40px]">
                   {partner.description || "No description available."}
                 </p>
-
-                {/* Micro-Stats Row */}
                 <div className="flex gap-4 pt-4 border-t border-slate-100">
                   <div className="flex flex-col">
                     <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Team</span>
@@ -230,11 +221,8 @@ export const BentoDashboard = () => {
             </Card>
           ))}
 
-          {/* Add New Card (Ghost) */}
           <AddAgencyDialog>
-            <div
-              className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-200 rounded-xl hover:border-primary/50 hover:bg-slate-50/50 transition-colors cursor-pointer group min-h-[200px]"
-            >
+            <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-200 rounded-xl hover:border-primary/50 hover:bg-slate-50/50 transition-colors cursor-pointer group min-h-[200px]">
               <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
                 <Plus className="h-6 w-6 text-slate-400 group-hover:text-primary" />
               </div>
@@ -244,8 +232,6 @@ export const BentoDashboard = () => {
         </div>
       )}
 
-
-
       {selectedPartner && (
         <PartnerProfileDialog
           partner={selectedPartner}
@@ -253,6 +239,13 @@ export const BentoDashboard = () => {
           onOpenChange={(open) => !open && setSelectedPartner(null)}
         />
       )}
+
+      <EditPartnerDialog
+        partner={editPartner}
+        open={!!editPartner}
+        onOpenChange={(open) => !open && setEditPartner(null)}
+        onSave={handleSaveEdit}
+      />
     </div>
   );
 };
