@@ -16,6 +16,11 @@ export function PartnerCard({ partner, onViewProfile, onEdit, onDelete }: Partne
   const partners = partner.partners || [];
   const services = partner.specializations || [];
 
+  // Show only the dollar range, trimming any explanatory text after a space or parenthesis
+  const revenueDisplay = partner.revenue_estimate
+    ? partner.revenue_estimate.split('(')[0].trim()
+    : null;
+
   return (
     <Card className="h-full flex flex-col hover:shadow-lg transition-all duration-300 border-border/50 bg-card/50 backdrop-blur-sm group">
       <CardContent className="p-6 flex flex-col h-full">
@@ -45,9 +50,9 @@ export function PartnerCard({ partner, onViewProfile, onEdit, onDelete }: Partne
                   Score: {partner.lead_score}
                 </Badge>
               )}
-              {partner.revenue_estimate && (
+              {revenueDisplay && (
                 <Badge variant="outline" className="text-[10px] uppercase font-bold text-muted-foreground bg-muted/30 border-muted-foreground/20">
-                  {partner.revenue_estimate}
+                  {revenueDisplay}
                 </Badge>
               )}
             </div>
