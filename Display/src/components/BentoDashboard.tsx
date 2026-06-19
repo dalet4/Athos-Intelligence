@@ -192,7 +192,7 @@ export const BentoDashboard = () => {
                   </CardTitle>
                   {partner.revenue_estimate && (
                     <Badge variant="outline" className="text-[10px] font-bold text-green-700 bg-green-50 border-green-200 uppercase shrink-0">
-                      {partner.revenue_estimate}
+                      {partner.revenue_estimate.split('(')[0].trim()}
                     </Badge>
                   )}
                 </div>
