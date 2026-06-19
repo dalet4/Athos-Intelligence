@@ -242,28 +242,30 @@ export const BentoDashboard = () => {
               onClick={() => setSelectedPartner(partner)}
             >
               <CardHeader className="space-y-1 pb-2">
-                <div className="flex justify-between items-start gap-2">
-                  <CardTitle className="text-lg font-bold text-foreground group-hover:text-primary transition-colors truncate min-w-0">
-                    {partner.name}
-                  </CardTitle>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {partner.lead_score != null && (
-                      <Badge
-                        variant="outline"
-                        className={`text-[10px] font-bold uppercase ${
-                          partner.lead_score >= 70 ? "bg-green-50 text-green-600 border-green-200" :
-                          partner.lead_score >= 40 ? "bg-yellow-50 text-yellow-600 border-yellow-200" :
-                          "bg-red-50 text-red-600 border-red-200"
-                        }`}
-                      >
-                        {partner.lead_score}
-                      </Badge>
-                    )}
-                    {partner.revenue_estimate && (
-                      <Badge variant="outline" className="text-[10px] font-bold text-green-700 bg-green-50 border-green-200 uppercase">
-                        {partner.revenue_estimate.split('(')[0].trim()}
-                      </Badge>
-                    )}
+                {/* Name always on its own line */}
+                <CardTitle className="text-lg font-bold text-foreground group-hover:text-primary transition-colors leading-tight">
+                  {partner.name}
+                </CardTitle>
+                {/* Badges + action buttons on second line */}
+                <div className="flex items-center gap-1 flex-wrap">
+                  {partner.lead_score != null && (
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] font-bold uppercase ${
+                        partner.lead_score >= 70 ? "bg-green-50 text-green-600 border-green-200" :
+                        partner.lead_score >= 40 ? "bg-yellow-50 text-yellow-600 border-yellow-200" :
+                        "bg-red-50 text-red-600 border-red-200"
+                      }`}
+                    >
+                      Score: {partner.lead_score}
+                    </Badge>
+                  )}
+                  {partner.revenue_estimate && (
+                    <Badge variant="outline" className="text-[10px] font-bold text-green-700 bg-green-50 border-green-200 uppercase">
+                      {partner.revenue_estimate.split('(')[0].trim()}
+                    </Badge>
+                  )}
+                  <div className="ml-auto flex gap-1">
                     <Button
                       variant="ghost"
                       size="icon"
@@ -285,7 +287,7 @@ export const BentoDashboard = () => {
                   </div>
                 </div>
                 {partner.specializations && partner.specializations.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
+                  <div className="flex flex-wrap gap-1 mt-1">
                     {partner.specializations.slice(0, 3).map((spec, i) => (
                       <span key={i} className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
                         {spec}
