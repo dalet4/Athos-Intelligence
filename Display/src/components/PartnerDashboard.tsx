@@ -192,7 +192,7 @@ export function PartnerDashboard() {
           name: data.name || partner.name,
           website: data.website || partner.website,
           description: data.description || partner.description,
-          revenue_estimate: data.revenue || partner.revenue_estimate,
+          revenue_estimate: data.revenue_estimate || partner.revenue_estimate,
           last_analyzed: new Date().toISOString(),
         };
 
@@ -255,7 +255,7 @@ export function PartnerDashboard() {
           name: data.name || searchTerm,
           website: data.website,
           description: data.description,
-          revenue_estimate: data.revenue,
+          revenue_estimate: data.revenue_estimate,
           specializations: data.specializations,
           platforms: data.platforms,
           clients: data.clients,
