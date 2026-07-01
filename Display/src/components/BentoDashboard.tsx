@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Plus, Search, Sparkles, Loader2, Pencil, Trash2, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +31,10 @@ export const BentoDashboard = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isEnriching, setIsEnriching] = useState(false);
+
+  useEffect(() => {
+    supabase.from("usage_events").insert({ event_type: "visit" });
+  }, []);
 
   const { data: partners, isLoading } = useQuery({
     queryKey: ["partners"],
@@ -98,6 +102,10 @@ export const BentoDashboard = () => {
     }
 
     setIsEnriching(true);
+    supabase.from("usage_events").insert({
+      event_type: "manual_enrich",
+      metadata: { count: incompletePartners.length },
+    });
     toast({ title: "Enrichment started", description: `Updating ${incompletePartners.length} agencies...` });
     let updatedCount = 0;
 
