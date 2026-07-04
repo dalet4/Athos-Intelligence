@@ -25,7 +25,7 @@ Deno.serve(async (req: Request) => {
 
         // Determine which fields are missing from existing data
         const isEmpty = (v: any) => v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
-        const ENRICHABLE_FIELDS = ['description', 'revenue_estimate', 'clients', 'awards', 'directors', 'partner_managers', 'case_studies', 'partners', 'specializations', 'platforms'];
+        const ENRICHABLE_FIELDS = ['website', 'description', 'revenue_estimate', 'clients', 'awards', 'directors', 'partner_managers', 'case_studies', 'partners', 'specializations', 'platforms'];
         const missingFields = existingData
             ? ENRICHABLE_FIELDS.filter(f => isEmpty(existingData[f]))
             : ENRICHABLE_FIELDS;
@@ -97,6 +97,7 @@ Deno.serve(async (req: Request) => {
             const model = requestedModel || "openai/gpt-4o-mini";
 
             const fieldSchemas: Record<string, string> = {
+                website: `"website": "official company website URL, or null if genuinely unknown"`,
                 description: `"description": "Short summary (max 200 chars)"`,
                 revenue_estimate: `"revenue_estimate": "$XM-$YM (estimate based on team size ~$150k/head)"`,
                 clients: `"clients": [{"name": "Client Name"}]`,

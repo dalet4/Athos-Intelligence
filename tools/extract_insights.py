@@ -139,49 +139,59 @@ Your task is to extract structured intelligence from scraped agency website cont
 Agency Content:
 {markdown_content[:25000]}"""
 
-    try:
-        completion = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={
-                "type": "json_schema", 
-                "json_schema": {
-                    "name": "agency_schema",
-                    "schema": Agency.model_json_schema()
-                }
-            }
-        )
-        
-        raw_json = completion.choices[0].message.content
-        
-        # Validation
-        try:
-            agency_data = Agency.model_validate_json(raw_json)
-            # Ensure website is set if LLM missed it or assumed
-            if not agency_data.website or agency_data.website == "unknown":
-                agency_data.website = website_url
-                
-            print(agency_data.model_dump_json(indent=2))
-            
-            # Record Cost
-            if run_id:
-                usage = completion.usage
-                cm = CostManager()
-                cm.record_usage(
-                    run_id=run_id,
-                    model=model,
-                    prompt_tokens=usage.prompt_tokens,
-                    completion_tokens=usage.completion_tokens
-                )
-            
-        except Exception as validation_error:
-            print(json.dumps({"error": f"Validation Error: {str(validation_error)}", "raw": raw_json}))
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
 
-    except Exception as e:
-        print(json.dumps({"error": f"LLM Error: {str(e)}"}))
+    # ponytail: 1 retry with the validation error fed back to the model, then give up
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
+        try:
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "agency_schema",
+                        "schema": Agency.model_json_schema()
+                    }
+                }
+            )
+
+            raw_json = completion.choices[0].message.content
+
+            try:
+                agency_data = Agency.model_validate_json(raw_json)
+                # Ensure website is set if LLM missed it or assumed
+                if not agency_data.website or agency_data.website == "unknown":
+                    agency_data.website = website_url
+
+                print(agency_data.model_dump_json(indent=2))
+
+                # Record Cost
+                if run_id:
+                    usage = completion.usage
+                    cm = CostManager()
+                    cm.record_usage(
+                        run_id=run_id,
+                        model=model,
+                        prompt_tokens=usage.prompt_tokens,
+                        completion_tokens=usage.completion_tokens
+                    )
+                return
+
+            except Exception as validation_error:
+                if attempt < max_attempts:
+                    messages.append({"role": "assistant", "content": raw_json})
+                    messages.append({"role": "user", "content": f"That response failed schema validation: {validation_error}. Return corrected JSON only."})
+                    continue
+                print(json.dumps({"error": f"Validation Error: {str(validation_error)}", "raw": raw_json}))
+
+        except Exception as e:
+            print(json.dumps({"error": f"LLM Error: {str(e)}"}))
+            return
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract insights from Agency markdown.")

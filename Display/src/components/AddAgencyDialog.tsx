@@ -30,11 +30,35 @@ export function AddAgencyDialog({ children }: { children?: React.ReactNode }) {
     const [companyOptions, setCompanyOptions] = useState<{ title: string, company_number: string, address: string }[]>([]);
     const [selectedCompanyNumber, setSelectedCompanyNumber] = useState<string>("");
 
+    // Fields fetch-agency-details returns beyond name/description — captured here so
+    // Save Agency doesn't discard them (they were previously fetched then thrown away)
+    const [enrichedExtra, setEnrichedExtra] = useState<Record<string, unknown>>({});
+
     const queryClient = useQueryClient();
     const { toast } = useToast();
 
     const handleInputChange = (field: string, value: string) => {
         setFormData((prev) => ({ ...prev, [field]: value }));
+    };
+
+    // ponytail: accept bare domains/www — browsers' native type="url" validation
+    // rejects anything without a scheme, so we add it here instead of forcing the user to type it
+    const normalizeWebsite = (value: string) => {
+        const trimmed = value.trim();
+        if (!trimmed || /^https?:\/\//i.test(trimmed)) return trimmed;
+        return `https://${trimmed}`;
+    };
+
+    // Fields fetch-agency-details can return that aren't shown in this form —
+    // same set BentoDashboard's bulk "Enrich Data" applies
+    const EXTRA_FIELDS = ['clients', 'awards', 'directors', 'partner_managers', 'case_studies', 'partners', 'specializations', 'platforms'] as const;
+    const captureExtraFields = (data: Record<string, unknown>) => {
+        const extra: Record<string, unknown> = {};
+        for (const field of EXTRA_FIELDS) {
+            const value = data[field];
+            if (Array.isArray(value) && value.length > 0) extra[field] = value;
+        }
+        setEnrichedExtra(extra);
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -44,14 +68,15 @@ export function AddAgencyDialog({ children }: { children?: React.ReactNode }) {
         try {
             const { error } = await supabase.from("agencies").insert({
                 name: formData.name,
-                website: formData.website || null,
+                website: normalizeWebsite(formData.website) || null,
                 description: formData.description || null,
                 revenue_estimate: formData.revenue_estimate || null,
-                // Default empty arrays for array fields to avoid null issues if UI expects arrays
+                // Default empty arrays for array fields, overridden by anything Auto-fill fetched
                 specializations: [],
                 platforms: [],
                 clients: [],
                 case_studies: [],
+                ...enrichedExtra,
             });
 
             if (error) throw error;
@@ -61,11 +86,14 @@ export function AddAgencyDialog({ children }: { children?: React.ReactNode }) {
                 description: `${formData.name} has been added to the database.`,
             });
 
+            // BentoDashboard (the live dashboard) caches agencies under "partners", not "agencies"
+            queryClient.invalidateQueries({ queryKey: ["partners"] });
             queryClient.invalidateQueries({ queryKey: ["agencies"] });
             setOpen(false);
             setFormData({ name: "", website: "", description: "", revenue_estimate: "" });
             setCompanyOptions([]);
             setSelectedCompanyNumber("");
+            setEnrichedExtra({});
         } catch (error: any) {
             toast({
                 title: "Error",
@@ -108,10 +136,10 @@ export function AddAgencyDialog({ children }: { children?: React.ReactNode }) {
                         <div className="flex gap-2">
                             <Input
                                 id="website"
-                                type="url"
+                                type="text"
                                 value={formData.website}
                                 onChange={(e) => handleInputChange("website", e.target.value)}
-                                placeholder="https://example.com"
+                                placeholder="example.com or agency name"
                             />
                             <Button
                                 type="button"
@@ -131,7 +159,7 @@ export function AddAgencyDialog({ children }: { children?: React.ReactNode }) {
                                         const { data, error } = await supabase.functions.invoke('fetch-agency-details', {
                                             body: {
                                                 // Support taking from memory if a disambiguation selected, else generic
-                                                url: formData.website || undefined,
+                                                url: formData.website ? normalizeWebsite(formData.website) : undefined,
                                                 name: !formData.website ? formData.name : undefined,
                                                 companyNumber: selectedCompanyNumber || undefined
                                             }
@@ -153,8 +181,11 @@ export function AddAgencyDialog({ children }: { children?: React.ReactNode }) {
                                         setFormData(prev => ({
                                             ...prev,
                                             name: data.name || prev.name,
+                                            website: data.website || prev.website,
                                             description: data.description || prev.description,
+                                            revenue_estimate: data.revenue_estimate || prev.revenue_estimate,
                                         }));
+                                        captureExtraFields(data);
 
                                         // Clear out options if we arrived from them
                                         setCompanyOptions([]);
@@ -228,6 +259,11 @@ export function AddAgencyDialog({ children }: { children?: React.ReactNode }) {
                                         const { data, error } = await supabase.functions.invoke('fetch-agency-details', {
                                             body: {
                                                 companyNumber: selectedCompanyNumber,
+                                                // Without these, the edge function's LLM extraction step is skipped
+                                                // entirely (it only runs when url or name is present) — CH data alone
+                                                // doesn't include description/specializations/platforms/etc.
+                                                url: formData.website ? normalizeWebsite(formData.website) : undefined,
+                                                name: !formData.website ? formData.name : undefined,
                                             }
                                         });
 
@@ -236,8 +272,11 @@ export function AddAgencyDialog({ children }: { children?: React.ReactNode }) {
                                         setFormData(prev => ({
                                             ...prev,
                                             name: data.name || prev.name,
+                                            website: data.website || prev.website,
                                             description: data.description || prev.description,
+                                            revenue_estimate: data.revenue_estimate || prev.revenue_estimate,
                                         }));
+                                        captureExtraFields(data);
 
                                         setCompanyOptions([]);
                                         toast({
