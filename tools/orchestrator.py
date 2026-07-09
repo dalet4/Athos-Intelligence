@@ -7,14 +7,17 @@ import json
 import logging
 import uuid
 import hashlib
+import time
+from typing import Optional
 from dotenv import load_dotenv
 from supabase import create_client
 from cost_manager import CostManager
+import tracing
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 _supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_ROLE_KEY"))
 
-def get_existing_hash(website: str) -> str | None:
+def get_existing_hash(website: str) -> Optional[str]:
     """Fetch stored content_hash for a website from Supabase."""
     try:
         res = _supabase.table("agencies").select("content_hash").eq("website", website).limit(1).execute()
@@ -59,7 +62,28 @@ def run_tool(script_name, input_data=None, args=None):
         return None
 
 def orchestrate(url: str, model: str = None):
+    """One trace per run: root span here, child span per phase, linked via TWOTAIL_PARENT_SPAN_ID."""
     run_id = str(uuid.uuid4())
+    trace_id = run_id.replace("-", "")
+    os.environ["TWOTAIL_TRACE_ID"] = trace_id
+    root_span_id = tracing.new_span_id()
+    root_start = time.time_ns()
+    status_code = 1
+    try:
+        _run_pipeline(url, model, run_id, trace_id, root_span_id)
+    except Exception:
+        status_code = 2
+        raise
+    finally:
+        tracing.send_span(
+            trace_id, root_span_id, None, "orchestration",
+            root_start, time.time_ns(),
+            attributes={"target.url": url, "workflow.name": "blast_pipeline", "run.id": run_id},
+            status_code=status_code,
+        )
+
+
+def _run_pipeline(url: str, model, run_id, trace_id, root_span_id):
     logging.info(f"🚀 Starting B.L.A.S.T. Orchestration (Run ID: {run_id}) for: {url}")
     if model:
         logging.info(f"🤖 Model override: {model}")
@@ -69,7 +93,11 @@ def orchestrate(url: str, model: str = None):
     scrape_args = ["--url", url, "--run-id", run_id]
     if model:
         scrape_args += ["--model", model]
+    _span_id, _start = tracing.new_span_id(), time.time_ns()
+    os.environ["TWOTAIL_PARENT_SPAN_ID"] = _span_id
     scrape_output_raw = run_tool("scrape_agency.py", args=scrape_args)
+    tracing.send_span(trace_id, _span_id, root_span_id, "scrape", _start, time.time_ns(),
+                       attributes={"target.url": url}, status_code=1 if scrape_output_raw else 2)
     
     if not scrape_output_raw:
         logging.error("Scraping failed. Aborting.")
@@ -104,7 +132,11 @@ def orchestrate(url: str, model: str = None):
     extract_args = ["--url", url, "--run-id", run_id]
     if model:
         extract_args += ["--model", model]
+    _span_id, _start = tracing.new_span_id(), time.time_ns()
+    os.environ["TWOTAIL_PARENT_SPAN_ID"] = _span_id
     extract_output_raw = run_tool("extract_insights.py", input_data=markdown_content, args=extract_args)
+    tracing.send_span(trace_id, _span_id, root_span_id, "extract", _start, time.time_ns(),
+                       status_code=1 if extract_output_raw else 2)
     
     if not extract_output_raw:
         logging.error("Extraction failed. Aborting.")
@@ -124,6 +156,8 @@ def orchestrate(url: str, model: str = None):
 
     # Step 2.5: Growth Monitoring (Social/News)
     logging.info("--- Phase 2.5: Growth Monitoring (Signal Check) ---")
+    _enrich_span_id, _enrich_start = tracing.new_span_id(), time.time_ns()
+    os.environ["TWOTAIL_PARENT_SPAN_ID"] = _enrich_span_id
     try:
         # Agency Name is needed for search. Extracted data has it.
         extract_json_obj = json.loads(extract_output_raw)
@@ -178,7 +212,6 @@ def orchestrate(url: str, model: str = None):
                 logging.info(f"✅ Discovered {len(all_siblings)} agencies in {parent} group.")
                 
                 # Automatic Lead Ingestion
-                import os
                 from supabase import create_client
                 _supa_url = os.getenv("SUPABASE_URL")
                 _supa_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
@@ -218,10 +251,16 @@ def orchestrate(url: str, model: str = None):
              
     except Exception as e:
         logging.error(f"Enrichment phases failed (non-fatal): {e}")
+    finally:
+        tracing.send_span(trace_id, _enrich_span_id, root_span_id, "enrich", _enrich_start, time.time_ns())
 
     # Step 3: Trigger (Store)
     logging.info("--- Phase 3: Storage (Trigger) ---")
+    _span_id, _start = tracing.new_span_id(), time.time_ns()
+    os.environ["TWOTAIL_PARENT_SPAN_ID"] = _span_id
     store_output_raw = run_tool("store_data.py", input_data=extract_output_raw)
+    tracing.send_span(trace_id, _span_id, root_span_id, "store", _start, time.time_ns(),
+                       status_code=1 if store_output_raw else 2)
     
     if not store_output_raw:
         logging.error("Storage failed. Aborting.")
@@ -243,7 +282,11 @@ def orchestrate(url: str, model: str = None):
     try:
         agency_id = store_json.get("id")
         if agency_id:
+            _span_id, _start = tracing.new_span_id(), time.time_ns()
+            os.environ["TWOTAIL_PARENT_SPAN_ID"] = _span_id
             score_output_raw = run_tool("score_leads.py", args=["--id", agency_id])
+            tracing.send_span(trace_id, _span_id, root_span_id, "score", _start, time.time_ns(),
+                               status_code=1 if score_output_raw else 2)
             if score_output_raw:
                 score_json = json.loads(score_output_raw)
                 if score_json.get("success"):

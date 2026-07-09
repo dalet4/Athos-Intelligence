@@ -1,7 +1,9 @@
 import sqlite3
 import os
 import json
+import time
 from datetime import datetime
+import tracing
 
 # ANSI color codes
 _R = "\033[0m"       # reset
@@ -227,6 +229,22 @@ class CostManager:
                 INSERT INTO llm_usage (run_id, model, prompt_tokens, completion_tokens, cost)
                 VALUES (?, ?, ?, ?, ?)
             """, (run_id, model, prompt_tokens, completion_tokens, cost))
+
+        # ponytail: no per-call start time available here (called post-hoc), so span is zero-duration.
+        now = time.time_ns()
+        trace_id = os.environ.get("TWOTAIL_TRACE_ID") or tracing.new_trace_id()
+        tracing.send_span(
+            trace_id, tracing.new_span_id(), os.environ.get("TWOTAIL_PARENT_SPAN_ID"),
+            f"llm.{model}", now, now,
+            attributes={
+                "gen_ai.system": model.split("/")[0] if "/" in model else "openai",
+                "gen_ai.request.model": model,
+                "gen_ai.usage.input_tokens": prompt_tokens,
+                "gen_ai.usage.output_tokens": completion_tokens,
+                "run.id": run_id,
+                "cost.usd": cost,
+            },
+        )
         return cost
 
     def get_period_stats(self):
